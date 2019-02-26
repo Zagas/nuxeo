@@ -33,7 +33,10 @@ import javax.naming.NamingException;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.directory.shared.ldap.codec.util.LdapURLEncodingException;
 import org.apache.directory.shared.ldap.name.LdapDN;
+import org.apache.directory.shared.ldap.url.LdapUrl;
+import org.apache.directory.shared.ldap.url.LdapUrlParser;
 import org.nuxeo.common.xmap.annotation.XNode;
 import org.nuxeo.common.xmap.annotation.XNodeList;
 import org.nuxeo.common.xmap.annotation.XObject;
@@ -41,8 +44,6 @@ import org.nuxeo.ecm.directory.DirectoryException;
 import org.nuxeo.ecm.directory.ldap.dns.DNSServiceEntry;
 import org.nuxeo.ecm.directory.ldap.dns.DNSServiceResolver;
 import org.nuxeo.ecm.directory.ldap.dns.DNSServiceResolverImpl;
-
-import com.sun.jndi.ldap.LdapURL;
 
 @XObject(value = "server")
 public class LDAPServerDescriptor {
@@ -161,7 +162,7 @@ public class LDAPServerDescriptor {
 
         List<String> urls = new ArrayList<>(ldapUrls.length);
         for (LDAPUrlDescriptor url : ldapUrls) {
-            LdapURL ldapUrl;
+            org.apache.directory.shared.ldap.codec.util.LdapURL ldapUrl;
             try {
                 /*
                  * Empty string translates to ldap://localhost:389 through JNDI
@@ -175,15 +176,16 @@ public class LDAPServerDescriptor {
                 /*
                  * Parse the URI to make sure it is valid
                  */
-                ldapUrl = new LdapURL(url.getValue());
+                ldapUrl = new org.apache.directory.shared.ldap.codec.util.LdapURL();
+                ldapUrl.parse(url.getValue().toCharArray());
                 if (!processed.add(url)) {
                     continue;
                 }
-            } catch (NamingException e) {
+            } catch (LdapURLEncodingException e) {
                 throw new DirectoryException(e);
             }
-
-            useSsl = useSsl || ldapUrl.useSsl();
+            boolean ldaps = ldapUrl.getScheme().startsWith("ldaps");
+            useSsl = useSsl || ldaps;
 
             /*
              * RFC-2255 - The "ldap" prefix indicates an entry or entries residing in the LDAP server running on the
@@ -194,14 +196,14 @@ public class LDAPServerDescriptor {
                 /*
                  * RFC-2782 - Check to see if an LDAP SRV record is defined in the DNS server
                  */
-                String domain = convertDNtoFQDN(ldapUrl.getDN());
+                String domain = convertDNtoFQDN(ldapUrl.getDn().getUpName());
                 if (domain != null) {
                     /*
                      * Dynamic URL - retrieve from SRV record
                      */
                     List<String> discoveredUrls;
                     try {
-                        discoveredUrls = discoverLdapServers(domain, ldapUrl.useSsl(), url.getSrvPrefix());
+                        discoveredUrls = discoverLdapServers(domain, ldaps, url.getSrvPrefix());
                     } catch (NamingException e) {
                         throw new DirectoryException(String.format("SRV record DNS lookup failed for %s.%s: %s",
                                 url.getSrvPrefix(), domain, e.getMessage()), e);
@@ -215,7 +217,7 @@ public class LDAPServerDescriptor {
                     /*
                      * Store entries in an ordered set and remember that we were dynamic
                      */
-                    ldapEntries.add(new LdapEntryDomain(url, domain, ldapUrl.useSsl()));
+                    ldapEntries.add(new LdapEntryDomain(url, domain, ldaps));
                     isDynamicServerList = true;
                 } else {
                     throw new DirectoryException(
