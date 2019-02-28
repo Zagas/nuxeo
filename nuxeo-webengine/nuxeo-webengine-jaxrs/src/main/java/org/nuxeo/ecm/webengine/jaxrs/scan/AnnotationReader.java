@@ -39,7 +39,7 @@ public class AnnotationReader extends ClassVisitor {
     protected String cname;
 
     public AnnotationReader(Set<String> annotations) throws IOException {
-        super(Opcodes.ASM5);
+        super(Opcodes.ASM7);
         results = new ArrayList<String>();
         this.annotations = annotations;
     }
